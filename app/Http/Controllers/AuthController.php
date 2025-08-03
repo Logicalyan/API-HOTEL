@@ -3,10 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Http\Traits\AuthResponses;
+use App\Mail\ResetPasswordRequestMail;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
 use Spatie\Permission\Models\Role;
 
@@ -14,23 +17,21 @@ class AuthController extends Controller
 {
     use AuthResponses;
 
-    public function me(Request $request)
-    {
-        $user = $request->user();
-
-        return response()->json([
-            'user' => $user,
-            // 'roles' => $user->getRoleNames(),
-        ]);
-    }
-
     public function register(Request $request)
     {
         try {
             $request->validate([
                 'name' => ['required', 'string', 'max:255'],
                 'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
-                'password' => ['required', 'string', 'min:8'],
+                'password' => [
+                    'required',
+                    'string',
+                    Password::min(8)
+                        ->letters()
+                        ->mixedCase()
+                        ->numbers()
+                        ->symbols()
+                ],
             ]);
         } catch (ValidationException $e) {
             $formattedErrors = [];
@@ -156,5 +157,78 @@ class AuthController extends Controller
             'User profile fetched successfully.',
             200
         );
+    }
+
+    public function resetPasswordRequest(Request $request)
+    {
+        // Implementasi logika untuk permintaan reset password
+
+        $request->validate([
+            'email' => 'required|string|email',
+        ]);
+
+        $user = User::where('email', $request->email)->first();
+
+        if (!$user) {
+            return $this->authErrorResponse('Reset Password Failed', 'User not found.', [], 404);
+        }
+
+        $code = rand(100000, 999999);
+        $user->otp_code = $code;
+
+        if ($user->save()) {
+            $emailData = array(
+                'heading' => 'Reset Password',
+                'name' => $user->name,
+                'email' => $user->email,
+                'code' => $user->otp_code,
+            );
+
+            Mail::to($emailData['email'])->queue(new ResetPasswordRequestMail($emailData));
+            return $this->authSuccessResponse(
+                null,
+                'Reset password code sent successfully.',
+                200
+            );
+        } else {
+            return $this->authErrorResponse('Reset Password Failed', 'Failed to send reset password code.', [], 500);
+        }
+    }
+
+    public function resetPassword(Request $request)
+    {
+        // Implementasi logika untuk reset password
+
+        $request->validate([
+            'email' => 'required|string|email',
+            'code' => 'required|integer',
+            'new_password' => [
+                'required',
+                Password::min(8)
+                    ->letters()
+                    ->mixedCase()
+                    ->numbers()
+                    ->symbols()
+            ],
+        ]);
+
+        $user = User::where('email', $request->email)->where('otp_code', $request->code)->first();
+
+        if (!$user) {
+            return $this->authErrorResponse('Reset Password Failed', 'User not found.', [], 404);
+        }
+
+        $user->password = Hash::make($request->new_password);
+        $user->otp_code = null;
+
+        if ($user->save()) {
+            return $this->authSuccessResponse(
+                null,
+                'Password reset successfully.',
+                200
+            );
+        } else {
+            return $this->authErrorResponse('Reset Password Failed', 'Failed to reset password.', [], 500);
+        }
     }
 }

@@ -118,6 +118,7 @@ class AuthController extends Controller
         return $this->authSuccessResponse(
             [
                 'user' => $user->only('id', 'name', 'email'),
+                'roles' => $user->getRoleNames(),
                 'token' => $token,
             ],
             'Logged in successfully.',
@@ -152,7 +153,7 @@ class AuthController extends Controller
         return $this->authSuccessResponse(
             [
                 'user' => $request->user()->only('id', 'name', 'email'),
-                'role' => $request->user()->getRoleNames(),
+                'roles' => $request->user()->getRoleNames(),
             ],
             'User profile fetched successfully.',
             200
@@ -184,7 +185,7 @@ class AuthController extends Controller
                 'code' => $user->otp_code,
             );
 
-            Mail::to($emailData['email'])->queue(new ResetPasswordRequestMail($emailData));
+            Mail::to($emailData['email'])->send(new ResetPasswordRequestMail($emailData));
             return $this->authSuccessResponse(
                 null,
                 'Reset password code sent successfully.',

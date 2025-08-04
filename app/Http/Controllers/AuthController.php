@@ -2,16 +2,18 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Traits\AuthResponses;
-use App\Mail\ResetPasswordRequestMail;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
 use App\Models\User;
+use Illuminate\Support\Str;
+use Illuminate\Http\Request;
+use App\Http\Traits\AuthResponses;
+use Spatie\Permission\Models\Role;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use App\Mail\ResetPasswordRequestMail;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
-use Spatie\Permission\Models\Role;
 
 class AuthController extends Controller
 {
@@ -176,6 +178,7 @@ class AuthController extends Controller
 
         $code = rand(100000, 999999);
         $user->otp_code = $code;
+        $user->otp_expires_at = now()->addMinutes(2);
 
         if ($user->save()) {
             $emailData = array(
@@ -188,12 +191,60 @@ class AuthController extends Controller
             Mail::to($emailData['email'])->send(new ResetPasswordRequestMail($emailData));
             return $this->authSuccessResponse(
                 null,
-                'Reset password code sent successfully.',
+                'Password reset code sent successfully. Please check your email.',
                 200
             );
         } else {
             return $this->authErrorResponse('Reset Password Failed', 'Failed to send reset password code.', [], 500);
         }
+    }
+
+    public function verifyOTP(Request $request)
+    {
+        // Implementasi logika untuk verifikasi OTP
+
+        $request->validate([
+            'email' => 'required|string|email',
+            'code' => 'required|integer',
+        ]);
+
+        $user = User::where('email', $request->email)->where('otp_code', $request->code)->first();
+
+        if (!$user) {
+            return $this->authErrorResponse('OTP Verification Failed', 'Invalid email or OTP code.', [], 401);
+        }
+
+        if ($user->otp_expires_at < now()) {
+            // Hapus OTP setelah kadaluarsa atau digunakan
+            $user->otp_code = null;
+            $user->otp_expires_at = null;
+            $user->save();
+            return $this->authErrorResponse('OTP Verification Failed', 'OTP has expired.', [], 400);
+        }
+
+
+        // OTP valid. Hapus OTP dari tabel users karena sudah digunakan.
+        $user->otp_code = null;
+        $user->otp_expires_at = null;
+        $user->save();
+
+        // Generate token reset password baru dan simpan di password_reset_tokens
+        $token = Str::random(60); // Token acak 60 karakter
+
+        // Hapus token lama untuk email ini jika ada
+        DB::table('password_reset_tokens')->where('email', $user->email)->delete();
+
+        DB::table('password_reset_tokens')->insert([
+            'email' => $user->email,
+            'token' => $token,
+            'created_at' => now(),
+        ]);
+
+        return $this->authSuccessResponse(
+            ['email' => $user->email, 'token' => $token], // <-- Kirim email dan token ke frontend
+            'OTP verified successfully. You can now reset your password.',
+            200
+        );
     }
 
     public function resetPassword(Request $request)
@@ -202,7 +253,7 @@ class AuthController extends Controller
 
         $request->validate([
             'email' => 'required|string|email',
-            'code' => 'required|integer',
+            'token' => 'required|string',
             'new_password' => [
                 'required',
                 Password::min(8)
@@ -213,19 +264,37 @@ class AuthController extends Controller
             ],
         ]);
 
-        $user = User::where('email', $request->email)->where('otp_code', $request->code)->first();
+        // Cari token di tabel password_reset_tokens
+        $passwordReset = DB::table('password_reset_tokens')
+            ->where('email', $request->email)
+            ->where('token', $request->token)
+            ->first();
+
+        if (!$passwordReset) {
+            return $this->authErrorResponse('Reset Password Failed', 'Invalid email or reset token.', [], 403); // 403 Forbidden
+        }
+
+        // Cek apakah token sudah kadaluarsa (misal 60 menit)
+        if (now()->diffInMinutes($passwordReset->created_at) > 60) { // Token berlaku 60 menit
+            DB::table('password_reset_tokens')->where('email', $request->email)->delete(); // Hapus token kadaluarsa
+            return $this->authErrorResponse('Reset Password Failed', 'Reset token has expired.', [], 400);
+        }
+
+        $user = User::where('email', $request->email)->first();
 
         if (!$user) {
             return $this->authErrorResponse('Reset Password Failed', 'User not found.', [], 404);
         }
 
         $user->password = Hash::make($request->new_password);
-        $user->otp_code = null;
 
         if ($user->save()) {
+            // Hapus token dari tabel password_reset_tokens setelah berhasil reset
+            DB::table('password_reset_tokens')->where('email', $request->email)->delete();
+
             return $this->authSuccessResponse(
                 null,
-                'Password reset successfully.',
+                'Password reset successfully. You can now login with your new password.',
                 200
             );
         } else {

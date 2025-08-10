@@ -57,16 +57,7 @@ class AuthController extends Controller
             'password' => Hash::make($request->password),
         ]);
 
-        // --- Bagian Penting: Memberikan Role 'user' secara otomatis ---
-        $userRole = Role::where('name', 'user')->first();
-        if ($userRole) {
-            $user->assignRole($userRole);
-        } else {
-            // Opsional: Buat role 'user' jika belum ada (hanya jika Anda tidak menggunakan seeder)
-            // Atau log error jika role tidak ditemukan, karena ini harusnya dibuat via seeder
-            $user->assignRole(Role::firstOrCreate(['name' => 'user']));
-        }
-        // -----------------------------------------------------------------
+            $user->assignRole('user');
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
@@ -114,7 +105,7 @@ class AuthController extends Controller
         $user = Auth::user();
 
         // Hapus token lama jika ada, lalu buat yang baru
-        $user->tokens()->delete(); // Opsional: hapus token sebelumnya untuk user ini
+        $user->tokens()->delete(); // hapus token sebelumnya untuk user ini
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return $this->authSuccessResponse(
@@ -141,7 +132,7 @@ class AuthController extends Controller
         }
 
         // Hapus token saat ini dari user yang terautentikasi
-        Auth::user()->currentAccessToken()->delete();
+        $request->user()->currentAccessToken()->delete();
 
         return $this->authSuccessResponse(
             null, // Data null karena tidak ada yang perlu dikembalikan setelah logout
@@ -178,7 +169,7 @@ class AuthController extends Controller
 
         $code = rand(100000, 999999);
         $user->otp_code = $code;
-        $user->otp_expires_at = now()->addMinutes(2);
+        $user->otp_expires_at = now()->addMinutes(5);
 
         if ($user->save()) {
             $emailData = array(
@@ -221,7 +212,6 @@ class AuthController extends Controller
             $user->save();
             return $this->authErrorResponse('OTP Verification Failed', 'OTP has expired.', [], 400);
         }
-
 
         // OTP valid. Hapus OTP dari tabel users karena sudah digunakan.
         $user->otp_code = null;

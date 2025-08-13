@@ -1,11 +1,11 @@
 <?php
 
-namespace App\Http\Traits; // Perhatikan namespace yang sesuai dengan lokasi folder
+// app/Http/Traits/ApiResponseFormatter.php
+namespace App\Http\Traits;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Pagination\LengthAwarePaginator;
 
-// Kata kunci 'trait' digunakan di sini
 trait ApiResponseFormatter
 {
     protected function successResponse(mixed $data = null, ?string $message = 'Operation successful.', int $status = 200): JsonResponse
@@ -27,6 +27,12 @@ trait ApiResponseFormatter
                 'last_page' => $data->lastPage(),
                 'from' => $data->firstItem(),
                 'to' => $data->lastItem(),
+            ];
+            $response['links'] = [
+                'first' => $data->url(1),
+                'last' => $data->url($data->lastPage()),
+                'prev' => $data->previousPageUrl(),
+                'next' => $data->nextPageUrl(),
             ];
         }
 

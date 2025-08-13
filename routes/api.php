@@ -12,3 +12,5 @@ Route::controller(AuthController::class)->group(function () {
     Route::post('/verify-otp', 'verifyOTP');
     Route::post('/reset-password', 'resetPassword');
 });
+
+Route::get('/provinces', 'App\Http\Controllers\LocationController@provinces');
